@@ -1,0 +1,80 @@
+version: "3.7"
+networks:
+  bitcoind:
+    name: bitcoind
+    driver: bridge
+services:
+  tor:
+    container_name: tor
+    image: getumbrel/tor:0.4.7.8 # https://hub.docker.com/r/getumbrel/tor/tags
+    user: "1000:1000"
+    restart: on-failure
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${PWD}/tor/torrc-proxy:/etc/tor/torrc:ro # echo "SocksPort 0.0.0.0:9050" > ${PWD}/tor/torrc-proxy
+      - ${PWD}/tor/data:/data
+    environment:
+      HOME: "/tmp"
+    networks:
+      - bitcoind
+    ports:
+      - "9050:9050"
+    expose:
+      - "9050/tcp"
+  bitcoind:
+    container_name: bitcoind
+    image: lncm/bitcoind:v24.0.1 # https://hub.docker.com/r/lncm/bitcoind/tags
+    depends_on: [tor]
+    restart: always
+    stop_grace_period: 15m30s
+    networks:
+      - bitcoind
+    ports:
+      - "8332:8332" # RPC
+      - "8333:8333" # P2P
+    expose:
+      - "8332/tcp"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${PWD}/bitcoind/:/data/.bitcoin
+    command: # https://en.bitcoinwiki.org/wiki/Running_Bitcoind
+      - "-minrelaytxfee=0"
+      - "-onion=tor:9050"
+      - "-onlynet=onion"
+      - "-printtoconsole"
+      - "-proxy=tor:9050"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-rpcbind=0.0.0.0"
+      - "-rpcpassword=mempool"
+      - "-rpcuser=mempool"
+      - "-server=1"
+      - "-testnet=0"
+      - "-txindex=1"
+  fulcrum:
+    container_name: fulcrum
+    image: cculianu/fulcrum:latest # https://hub.docker.com/r/cculianu/fulcrum/tags
+    depends_on: [bitcoind]
+    restart: on-failure
+    networks:
+      - bitcoind
+    ports:
+      - "50001:50001"
+      - "50002:50002"
+      - "50003:50003"
+      - "50004:50004"
+    expose:
+      - "50002/tcp"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${PWD}/fulcrum:/data
+    environment: # https://raw.githubusercontent.com/cculianu/Fulcrum/master/doc/fulcrum-example-config.conf
+      DATA_DIR: "/data"
+      BITCOIND: "bitcoind:8332"
+      RPCUSER: "mempool"
+      RPCPASSWORD: "mempool"
+      TOR_PROXY: tor:9059
+      PEERING: false
+      ANNOUNCE: false
+    command: # https://github.com/cculianu/Fulcrum/blob/master/doc/unix-man-page.md
+      - "Fulcrum"
+      - "_ENV_"
